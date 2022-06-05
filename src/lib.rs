@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+use std::{cmp::Ordering, str::FromStr, fmt::Display};
 use cosmwasm_std::{Addr, StdError};
 use cw_storage_plus::{PrimaryKey, KeyDeserialize, Key, Prefixer};
 use schemars::JsonSchema;
@@ -23,6 +23,48 @@ impl PartialOrd for Fungible {
       (Fungible::Token(a), Fungible::Token(b)) => a.partial_cmp(b),
       (Fungible::Coin(_), Fungible::Token(_)) => Some(Ordering::Greater),
       (Fungible::Token(_), Fungible::Coin(_)) => Some(Ordering::Less),
+    }
+  }
+}
+
+impl Display for Fungible {
+  fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    match self {
+      Fungible::Coin(coin) => write!(f, "Coin({})", coin),
+      Fungible::Token(addr) => write!(f, "Token({})", addr),
+    }
+  }
+}
+
+impl From<Fungible> for String {
+  fn from(fungible: Fungible) -> String {
+    String::from(&fungible)
+  }
+}
+
+impl<'a> From<&'a Fungible> for String {
+  fn from(fungible: &'a Fungible) -> String {
+    match fungible {
+      Fungible::Coin(coin) => format!("Coin({})", coin),
+      Fungible::Token(token) => format!("Token({})", token.to_string()),
+    }
+  }
+}
+
+impl FromStr for Fungible {
+  type Err = String;
+  
+  fn from_str(s: &str) -> Result<Self> {
+    if s.starts_with("Coin(") && s.ends_with(')') {
+      let coin = &s[5..s.len() - 1];
+      Ok(Fungible::Coin(coin.to_string()))
+    }
+    else if s.starts_with("Token(") && s.ends_with(')') {
+      let token = &s[6..s.len() - 1];
+      Ok(Fungible::Token(Addr::unchecked(token)))
+    }
+    else {
+      Err(format!("Invalid fungible: {}", s))
     }
   }
 }
@@ -114,5 +156,23 @@ mod tests {
     
     map.save(&mut store, (coin.clone(), token.clone()), &"abc".to_string()).unwrap();
     assert_eq!(map.load(&mut store, (coin.clone(), token.clone())).unwrap(), "abc".to_string());
+  }
+  
+  #[test]
+  fn test_stringify() {
+    let coin = Fungible::Coin("uluna".to_string());
+    let token = Fungible::Token(Addr::unchecked("whDAI"));
+    
+    assert_eq!(coin.to_string(), "Coin(uluna)");
+    assert_eq!(token.to_string(), "Token(whDAI)");
+  }
+  
+  #[test]
+  fn test_parse() {
+    let coin_str = "Coin(uluna)";
+    let token_str = "Token(whDAI)";
+    
+    assert_eq!(Fungible::from_str(coin_str).unwrap(), Fungible::Coin("uluna".to_string()));
+    assert_eq!(Fungible::from_str(token_str).unwrap(), Fungible::Token(Addr::unchecked("whDAI")));
   }
 }
