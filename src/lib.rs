@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
-use cosmwasm_std::{Addr};
+use cosmwasm_std::{Addr, StdError};
+use cw_storage_plus::{PrimaryKey, KeyDeserialize, Key, Prefixer};
 use schemars::JsonSchema;
 use serde::{Serialize, Deserialize};
 
@@ -26,9 +27,49 @@ impl PartialOrd for Fungible {
   }
 }
 
+impl KeyDeserialize for Fungible {
+  type Output = Self;
+
+  fn from_vec(value: Vec<u8>) -> cosmwasm_std::StdResult<Self::Output> {
+    match value[0] {
+      0 => Ok(Fungible::Coin(String::from_vec(value[1..].to_vec()).unwrap())),
+      1 => Ok(Fungible::Token(Addr::from_vec(value[1..].to_vec()).unwrap())),
+      _ => Err(StdError::ParseErr {
+        target_type: "Fungible".to_string(),
+        msg: "Invalid type byte".to_string(),
+      }),
+    }
+  }
+}
+
+impl<'a> PrimaryKey<'a> for Fungible {
+  type Prefix = u8;
+  type SubPrefix = ();
+  type Suffix = Self;
+  type SuperSuffix = Self;
+
+  fn key(&self) -> Vec<cw_storage_plus::Key> {
+    match self {
+      Fungible::Coin(coin) => vec![Key::Ref(coin.as_bytes())],
+      Fungible::Token(token) => vec![Key::Ref(token.as_bytes())],
+    }
+  }
+}
+
+impl<'a> Prefixer<'a> for Fungible {
+  fn prefix(&self) -> Vec<Key> {
+    match self {
+      Fungible::Coin(_) => vec![Key::Val8([0u8])],
+      Fungible::Token(_) => vec![Key::Val8([1u8])],
+    }
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+  use cosmwasm_std::testing::MockStorage;
+  use cw_storage_plus::Map;
   
   #[test]
   fn test_comparison() {
@@ -52,5 +93,26 @@ mod tests {
     // token-token
     assert!(token1 < token2);
     assert!(token2 > token1);
+  }
+  
+  #[test]
+  fn test_storage_primarykey() {
+    let mut store = MockStorage::new();
+    let map = Map::<Fungible, String>::new("test");
+    let coin = Fungible::Coin("uluna".to_string());
+    
+    map.save(&mut store, coin.clone(), &"abc".to_string()).unwrap();
+    assert_eq!(map.load(&mut store, coin.clone()).unwrap(), "abc".to_string());
+  }
+  
+  #[test]
+  fn test_storage_tuplekey() {
+    let mut store = MockStorage::new();
+    let map = Map::<(Fungible, Fungible), String>::new("test");
+    let coin = Fungible::Coin("uluna".to_string());
+    let token = Fungible::Token(Addr::unchecked("whDAI"));
+    
+    map.save(&mut store, (coin.clone(), token.clone()), &"abc".to_string()).unwrap();
+    assert_eq!(map.load(&mut store, (coin.clone(), token.clone())).unwrap(), "abc".to_string());
   }
 }
